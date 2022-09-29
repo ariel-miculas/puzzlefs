@@ -67,6 +67,7 @@ fn write_chunks_to_oci(oci: &Image, fcdc: &mut FastCDCWrapper) -> Result<Vec<Fil
     pending_chunks
         .iter_mut()
         .map(|c| {
+            eprintln!("[write_chunks_to_oci] chunk: off {:?} len {:?}", c.offset, c.length);
             let desc = oci.put_blob::<_, compression::Noop, media_types::Chunk>(&*c.data)?;
             Ok(FileChunk {
                 blob: BlobRef {
@@ -89,6 +90,53 @@ fn take_first_chunk<FileChunk>(v: &mut Vec<FileChunk>) -> io::Result<FileChunk> 
     }
 }
 
+fn take_first_file<File>(v: &mut Vec<File>) -> io::Result<File> {
+    if !v.is_empty() {
+        Ok(v.remove(0))
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, "missing file"))
+    }
+}
+
+fn merge_chunks(
+    chunks: &mut Vec<FileChunk>,
+    files: &mut Vec<File>,
+    prev_files: &mut Vec<File>,
+) -> io::Result<()> {
+    let mut file = &mut prev_files[0];
+    let mut file_used: u64 = Iterator::sum(file.chunk_list.chunks.iter().map(|c| c.len));
+
+    for current_chunk in chunks.drain(..) {
+        let mut chunk_used = 0;
+        eprintln!("current chunk: {:?}", current_chunk);
+        while chunk_used < current_chunk.len {
+            eprintln!("md.len {:?}, file_used {:?}, chunk_len: {:?}, chunk_used {:?}", file.md.len(), file_used, current_chunk.len, chunk_used);
+            let room = min(file.md.len() - file_used, current_chunk.len - chunk_used);
+
+            let blob = BlobRef {
+                offset: chunk_used,
+                kind: current_chunk.blob.kind,
+            };
+
+            file.chunk_list.chunks.push(FileChunk { blob, len: room });
+
+            chunk_used += room;
+            file_used += room;
+
+            // get next file
+            if file_used == file.md.len() {
+                files.push(prev_files.remove(0));
+                if prev_files.is_empty() {
+                    break;
+                }
+                file = &mut prev_files[0];
+                file_used = 0;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn merge_chunks_and_prev_files(
     chunks: &mut Vec<FileChunk>,
     files: &mut Vec<File>,
@@ -96,16 +144,21 @@ fn merge_chunks_and_prev_files(
 ) -> io::Result<FileChunk> {
     let mut chunk_used = 0;
     let mut chunk = take_first_chunk(chunks)?;
+    eprintln!("0: first chunk {:?}", chunk);
 
     for mut file in prev_files.drain(..) {
         let mut file_used: u64 = Iterator::sum(file.chunk_list.chunks.iter().map(|c| c.len));
+        eprintln!("file_used: {:?}", file_used);
         while file_used < file.md.len() {
             if chunk_used == chunk.len {
+                eprintln!("1: chunk_used {:?} == chunk_len {:?} file used {:?}, md_len {:?}", chunk_used, chunk.len, file_used, file.md.len());
                 chunk_used = 0;
                 chunk = take_first_chunk(chunks)?;
+                eprintln!("first chunk {:?}", chunk);
             }
 
             let room = min(file.md.len() - file_used, chunk.len - chunk_used);
+            eprintln!("room {:?}, 1st {:?}, second: {:?}", room, file.md.len() - file_used, chunk.len - chunk_used);
             let blob = BlobRef {
                 offset: chunk_used,
                 kind: chunk.blob.kind,
@@ -113,11 +166,13 @@ fn merge_chunks_and_prev_files(
             file.chunk_list.chunks.push(FileChunk { blob, len: room });
             chunk_used += room;
             file_used += room;
+            eprintln!("chunk_used {:?}, file_used {:?}", chunk_used, file_used);
         }
         files.push(file);
     }
 
     if chunk_used == chunk.len {
+        eprintln!("2: chunk_used {:?} == chunk_len {:?}", chunk_used, chunk.len);
         take_first_chunk(chunks)
     } else {
         // fix up the first chunk to have the right offset for this file
@@ -236,6 +291,8 @@ fn build_delta(rootfs: &Path, oci: &Image, mut existing: Option<PuzzleFS>) -> Re
                 next
             });
 
+            eprintln!("processing {:?}", e.file_name());
+
             // now that we know the ino of this thing, let's put it in the parent directory (assuming
             // this is not "/" for our image, aka inode #1)
             if cur_ino != 1 {
@@ -305,18 +362,17 @@ fn build_delta(rootfs: &Path, oci: &Image, mut existing: Option<PuzzleFS>) -> Re
                     additional,
                 };
 
+                eprintln!("pushed previous file: {:?}, len: {:?}", e.file_name(), file.md.len());
+                prev_files.push(file);
                 if written_chunks.is_empty() {
                     // this file wasn't big enough to cause a chunk to be generated, add it to the list
                     // of files pending for this chunk
-                    prev_files.push(file);
                 } else {
-                    let fixed_chunk = merge_chunks_and_prev_files(
+                    merge_chunks(
                         &mut written_chunks,
                         &mut files,
                         &mut prev_files,
                     )?;
-                    file.chunk_list.chunks.push(fixed_chunk);
-                    file.chunk_list.chunks.append(&mut written_chunks);
                 }
             } else {
                 let o = Other {
@@ -341,10 +397,17 @@ fn build_delta(rootfs: &Path, oci: &Image, mut existing: Option<PuzzleFS>) -> Re
         // merge everything leftover with all previous files. we expect an error here, since the in
         // put shoudl be exactly consumed and the final take_first_chunk() call should fail. TODO:
         // rearrange this to be less ugly.
-        merge_chunks_and_prev_files(&mut written_chunks, &mut files, &mut prev_files).unwrap_err();
+        merge_chunks(&mut written_chunks, &mut files, &mut prev_files).unwrap();
 
         // we should have consumed all the chunks.
         assert!(written_chunks.is_empty());
+    }
+
+    for current_file in &files {
+        eprintln!("File");
+        for chunk in &current_file.chunk_list.chunks {
+            eprintln!("chunks are: {:?} {:?}", chunk.blob, chunk.len);
+        }
     }
 
     // total inode serailized size

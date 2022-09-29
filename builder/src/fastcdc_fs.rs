@@ -23,10 +23,13 @@ use fastcdc::FastCDC;
 
 // 'ubuntu' base image is ~40M, as are other base images. If we have any hope of wanting to share
 // these, we should allow small chunks.
-const MIN_CHUNK_SIZE: usize = 10 * 1024 * 1024;
-const AVG_CHUNK_SIZE: usize = 40 * 1024 * 1024;
-const MAX_CHUNK_SIZE: usize = 256 * 1024 * 1024;
+// const MIN_CHUNK_SIZE: usize = 10 * 1024 * 1024;
+// const AVG_CHUNK_SIZE: usize = 40 * 1024 * 1024;
+// const MAX_CHUNK_SIZE: usize = 256 * 1024 * 1024;
 
+const MIN_CHUNK_SIZE: usize = 16384;
+const AVG_CHUNK_SIZE: usize = 32768;
+const MAX_CHUNK_SIZE: usize = 65536;
 #[derive(Clone)]
 pub struct ChunkWithData {
     pub offset: usize,
@@ -83,6 +86,7 @@ impl FastCDCWrapper {
 
         let mut used = 0;
         for chunk in chunks {
+            eprintln!("[render_chunks]: len {:?}", chunk.length);
             // fix up the offset to be relative to everything that's been written
             let mut data = vec![0; chunk.length].into_boxed_slice();
             data.copy_from_slice(&self.buf[used..used + chunk.length]);
@@ -96,6 +100,7 @@ impl FastCDCWrapper {
         self.global_offset += used;
 
         let leftover = self.buf_offset - used;
+        eprintln!("buf_offset {:?}, leftover: {:?}", self.buf_offset, leftover);
         let mut bytes = vec![0_u8; leftover].into_boxed_slice();
         bytes.copy_from_slice(&self.buf[used..used + leftover]);
         self.buf[0..leftover].copy_from_slice(&bytes);
@@ -113,12 +118,15 @@ impl io::Write for FastCDCWrapper {
         while write_offset != write.len() {
             // copy as much of this write as we can
             let room = min(self.buf.len() - self.buf_offset, write.len() - write_offset);
+            eprintln!("[write] room: {:?} 1st {:?} 2nd {:?}", room, self.buf.len() - self.buf_offset, write.len() - write_offset);
             let cur = &write[write_offset..write_offset + room];
             if self.buf_offset + cur.len() <= self.buf.len() {
                 self.buf[self.buf_offset..self.buf_offset + cur.len()].copy_from_slice(cur);
                 self.buf_offset += cur.len();
                 write_offset += cur.len();
             }
+
+            eprintln!("[write] write_offset: {:?}", write_offset);
 
             // is our buffer full? chunk it
             if self.buf_offset == self.buf.len() {

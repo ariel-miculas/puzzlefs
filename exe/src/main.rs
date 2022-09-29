@@ -6,6 +6,7 @@ extern crate nix;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::{thread,time::Duration};
 
 use clap::Clap;
 use nix::sys::stat::{makedev, mknod, Mode, SFlag};
@@ -119,6 +120,7 @@ fn main() -> anyhow::Result<()> {
             let image = Image::new(oci_dir)?;
             let mountpoint = Path::new(&m.mountpoint);
             let _bg = mount(&image, &m.tag, mountpoint)?;
+            thread::sleep(Duration::from_millis(60000 * 10));
             let mut signals = SignalsInfo::<SignalOnly>::new(TERM_SIGNALS);
             for s in &mut signals {
                 eprintln!("got signal {:?}, exiting puzzlefs fuse mount", s);
