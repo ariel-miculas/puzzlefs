@@ -445,9 +445,11 @@ impl Filesystem for Fuse<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::io;
     use std::path::Path;
+    use std::time::Instant;
+    use std::{fs, fs::File};
+    use std::{io, io::Read};
+    use walkdir::WalkDir;
 
     extern crate hex;
     use sha2::{Digest, Sha256};
@@ -460,7 +462,7 @@ mod tests {
     fn test_fuse() {
         let dir = tempdir().unwrap();
         let image = Image::new(dir.path()).unwrap();
-        let rootfs_desc = build_test_fs(&image).unwrap();
+        let rootfs_desc = build_test_fs(Path::new("../builder/test"), &image).unwrap();
         image.add_tag("test".to_string(), rootfs_desc).unwrap();
         let mountpoint = tempdir().unwrap();
         let _bg = crate::mount(&image, "test", Path::new(mountpoint.path())).unwrap();
@@ -475,11 +477,53 @@ mod tests {
         );
 
         let mut hasher = Sha256::new();
-        let mut f = fs::File::open(ents[0].path()).unwrap();
+        let mut f = File::open(ents[0].path()).unwrap();
         io::copy(&mut f, &mut hasher).unwrap();
         let digest = hasher.finalize();
         const FILE_DIGEST: &str =
             "d9e749d9367fc908876749d6502eb212fee88c9a94892fb07da5ef3ba8bc39ed";
         assert_eq!(hex::encode(digest), FILE_DIGEST);
+    }
+
+    #[test]
+    fn test_fuse_read() {
+        let dir = tempdir().unwrap();
+        let image = Image::new(dir.path()).unwrap();
+        let original_path =
+            Path::new("/home/amiculas/work/cisco/test-puzzlefs/real_rootfs/barehost/rootfs");
+        let rootfs_desc = build_test_fs(original_path, &image).unwrap();
+        image.add_tag("test".to_string(), rootfs_desc).unwrap();
+        let mountpoint = tempdir().unwrap();
+
+        // cannot use filter_entry because the iterator will not descend into the filtered directories
+        let ents = WalkDir::new(original_path)
+            .contents_first(false)
+            .follow_links(false)
+            .same_file_system(true)
+            .sort_by(|a, b| a.file_name().cmp(b.file_name()))
+            .into_iter()
+            .filter(|de| {
+                de.as_ref()
+                    .unwrap()
+                    .metadata()
+                    .map(|md| md.is_file())
+                    .unwrap_or(true)
+            })
+            .collect::<Result<Vec<walkdir::DirEntry>, walkdir::Error>>()
+            .unwrap();
+
+        for ent in &ents {
+            let _bg = crate::mount(&image, "test", Path::new(mountpoint.path())).unwrap();
+            let new_path =
+                Path::new(mountpoint.path()).join(ent.path().strip_prefix(original_path).unwrap());
+            let mut buffer = [0; 1];
+
+            let now = Instant::now();
+
+            let mut f = fs::File::open(&new_path).unwrap();
+            f.read(&mut buffer).unwrap();
+            let elapsed = now.elapsed();
+            println!("file {}, Elapsed: {:.2?}", new_path.display(), elapsed);
+        }
     }
 }
