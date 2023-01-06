@@ -801,6 +801,7 @@ dependencies = [
  "format",
  "fuser",
  "hex",
+ "log",
  "nix",
  "oci",
  "sha2",

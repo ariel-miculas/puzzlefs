@@ -29,5 +29,5 @@ pub fn spawn_mount(
 ) -> Result<fuse_ffi::BackgroundSession> {
     let pfs = PuzzleFS::open(image, tag)?;
     let fuse = Fuse::new(pfs, sender);
-    Ok(fuse_ffi::spawn_mount2(fuse, mountpoint, &[])?)
+    Ok(fuse_ffi::spawn_mount2(fuse, mountpoint, &[fuser::MountOption::AllowOther])?)
 }

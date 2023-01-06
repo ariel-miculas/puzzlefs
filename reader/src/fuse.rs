@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use log::{info};
 
 use fuser::{
     FileAttr, FileType, Filesystem, KernelConfig, ReplyData, ReplyEntry, ReplyOpen, Request,
@@ -79,9 +80,11 @@ impl Fuse {
             | OFlag::O_PATH
             | OFlag::O_NONBLOCK
             | OFlag::O_DIRECTORY
-            | OFlag::O_NOFOLLOW;
+            | OFlag::O_NOFOLLOW
+            | OFlag::O_NOATIME;
         let flags = OFlag::from_bits_truncate(flags_i);
         if !allowed_flags.contains(flags) {
+            info!("invalid flags {flags:?}, only allowed {allowed_flags:?}");
             reply.error(Errno::EROFS as i32)
         } else {
             // stateless open for now, slower maybe
@@ -199,6 +202,7 @@ impl Filesystem for Fuse {
         _flags: Option<u32>,
         reply: fuser::ReplyAttr,
     ) {
+        info!("setattr not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -212,6 +216,7 @@ impl Filesystem for Fuse {
         _rdev: u32,
         reply: ReplyEntry,
     ) {
+        info!("mknod not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -224,14 +229,17 @@ impl Filesystem for Fuse {
         _umask: u32,
         reply: ReplyEntry,
     ) {
+        info!("mkdir not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
     fn unlink(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: fuser::ReplyEmpty) {
+        info!("unlink not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
     fn rmdir(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: fuser::ReplyEmpty) {
+        info!("rmdir not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -243,6 +251,7 @@ impl Filesystem for Fuse {
         _link: &Path,
         reply: ReplyEntry,
     ) {
+        info!("symlink not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -256,6 +265,7 @@ impl Filesystem for Fuse {
         _flags: u32,
         reply: fuser::ReplyEmpty,
     ) {
+        info!("rename not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -267,6 +277,7 @@ impl Filesystem for Fuse {
         _newname: &OsStr,
         reply: ReplyEntry,
     ) {
+        info!("link not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -282,6 +293,7 @@ impl Filesystem for Fuse {
         _lock_owner: Option<u64>,
         reply: fuser::ReplyWrite,
     ) {
+        info!("write not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -293,6 +305,7 @@ impl Filesystem for Fuse {
         _lock_owner: u64,
         reply: fuser::ReplyEmpty,
     ) {
+        info!("flush not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -304,6 +317,7 @@ impl Filesystem for Fuse {
         _datasync: bool,
         reply: fuser::ReplyEmpty,
     ) {
+        info!("fsync not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -315,6 +329,7 @@ impl Filesystem for Fuse {
         _datasync: bool,
         reply: fuser::ReplyEmpty,
     ) {
+        info!("fsyncdir not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -332,6 +347,7 @@ impl Filesystem for Fuse {
     }
 
     fn removexattr(&mut self, _req: &Request, _ino: u64, _name: &OsStr, reply: fuser::ReplyEmpty) {
+        info!("removexattr not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -345,6 +361,7 @@ impl Filesystem for Fuse {
         _flags: i32,
         reply: fuser::ReplyCreate,
     ) {
+        info!("create not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -360,6 +377,7 @@ impl Filesystem for Fuse {
         _pid: u32,
         reply: fuser::ReplyLock,
     ) {
+        info!("getlk not supported!");
         reply.error(Errno::EROFS as i32)
     }
 
@@ -376,6 +394,7 @@ impl Filesystem for Fuse {
         _sleep: bool,
         reply: fuser::ReplyEmpty,
     ) {
+        info!("setlk not supported!");
         reply.error(Errno::EROFS as i32)
     }
 

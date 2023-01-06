@@ -95,9 +95,20 @@ fn main() -> anyhow::Result<()> {
             image.add_tag(b.tag, desc).map_err(|e| e.into())
         }
         SubCommand::Mount(m) => {
+            if m.foreground {
+                init_logging("info");
+            } else {
+                init_syslog()?;
+            }
             let oci_dir = Path::new(&m.oci_dir);
             let oci_dir = fs::canonicalize(oci_dir)?;
-            let image = Image::new(&oci_dir)?;
+            let image = Image::new(&oci_dir);
+            match image {
+                Err(ref e) => info!("error {}", e) ,
+                Ok(_) => ()
+            }
+            let image = image.unwrap();
+
             let mountpoint = Path::new(&m.mountpoint);
             let mountpoint = fs::canonicalize(mountpoint)?;
 
@@ -116,7 +127,7 @@ fn main() -> anyhow::Result<()> {
                 // This blocks until either ctrl-c is pressed or the filesystem is unmounted
                 let () = recv.recv().unwrap();
             } else {
-                init_syslog()?;
+                info!("oci: {} mount: {} {}",oci_dir.display(), mountpoint.display(), m.tag);
                 let (mut reader, writer) = os_pipe::pipe()?;
                 let daemonize = Daemonize::new()
                     .stdout(writer.as_raw_fd())
