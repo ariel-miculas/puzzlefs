@@ -145,6 +145,7 @@ fn build_delta<C: Compression>(
     rootfs: &Path,
     oci: &Image,
     mut existing: Option<PuzzleFS>,
+    cdc_params: &[u32; 3],
 ) -> Result<Descriptor> {
     let mut dirs = HashMap::<u64, Dir>::new();
     let mut files = Vec::<File>::new();
@@ -326,9 +327,9 @@ fn build_delta<C: Compression>(
 
     let fcdc = StreamCDC::new(
         Box::new(fs_stream),
-        MIN_CHUNK_SIZE,
-        AVG_CHUNK_SIZE,
-        MAX_CHUNK_SIZE,
+        cdc_params[0],
+        cdc_params[1],
+        cdc_params[2],
     );
     process_chunks::<C>(oci, fcdc, &mut files)?;
 
@@ -442,8 +443,17 @@ fn build_delta<C: Compression>(
     oci.put_blob::<_, compression::Noop, media_types::Inodes>(md_buf.as_slice())
 }
 
-pub fn build_initial_rootfs<C: Compression>(rootfs: &Path, oci: &Image) -> Result<Descriptor> {
-    let desc = build_delta::<C>(rootfs, oci, None)?;
+pub fn build_initial_rootfs<C: Compression>(
+    rootfs: &Path,
+    oci: &Image,
+    cdc_params: Option<&[u32; 3]>,
+) -> Result<Descriptor> {
+    let desc = build_delta::<C>(
+        rootfs,
+        oci,
+        None,
+        cdc_params.unwrap_or(&[MIN_CHUNK_SIZE, AVG_CHUNK_SIZE, MAX_CHUNK_SIZE]),
+    )?;
     let metadatas = [BlobRef {
         offset: 0,
         kind: BlobRefKind::Other {
@@ -463,10 +473,16 @@ pub fn add_rootfs_delta<C: Compression>(
     rootfs: &Path,
     oci: Image,
     tag: &str,
+    cdc_params: Option<&[u32; 3]>,
 ) -> Result<(Descriptor, Arc<Image>)> {
     let pfs = PuzzleFS::open(oci, tag)?;
     let oci = Arc::clone(&pfs.oci);
-    let desc = build_delta::<C>(rootfs, &oci, Some(pfs))?;
+    let desc = build_delta::<C>(
+        rootfs,
+        &oci,
+        Some(pfs),
+        cdc_params.unwrap_or(&[MIN_CHUNK_SIZE, AVG_CHUNK_SIZE, MAX_CHUNK_SIZE]),
+    )?;
     let mut rootfs = oci.open_rootfs_blob::<compression::Noop>(tag)?;
     let br = BlobRef {
         kind: BlobRefKind::Other {
@@ -485,7 +501,7 @@ pub fn add_rootfs_delta<C: Compression>(
 
 // TODO: figure out how to guard this with #[cfg(test)]
 pub fn build_test_fs(path: &Path, image: &Image) -> Result<Descriptor> {
-    build_initial_rootfs::<compression::Zstd>(path, image)
+    build_initial_rootfs::<compression::Zstd>(path, image, None)
 }
 
 #[cfg(test)]
@@ -588,7 +604,7 @@ pub mod tests {
         .unwrap();
 
         let (desc, image) =
-            add_rootfs_delta::<DefaultCompression>(&delta_dir, image, &tag).unwrap();
+            add_rootfs_delta::<DefaultCompression>(&delta_dir, image, &tag, None).unwrap();
         let new_tag = "test2".to_string();
         image.add_tag(new_tag.to_string(), desc).unwrap();
         let delta = image
