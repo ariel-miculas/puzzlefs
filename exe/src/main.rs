@@ -33,6 +33,12 @@ struct Build {
     tag: String,
     #[arg(short, long, value_name = "base-layer")]
     base_layer: Option<String>,
+    #[arg(long, value_name = "min")]
+    min: Option<u32>,
+    #[arg(long, value_name = "avg")]
+    avg: Option<u32>,
+    #[arg(long, value_name = "max")]
+    max: Option<u32>,
 }
 
 #[derive(Args)]
@@ -95,16 +101,29 @@ fn main() -> anyhow::Result<()> {
     let opts: Opts = Opts::parse();
     match opts.subcmd {
         SubCommand::Build(b) => {
+            init_logging("info");
             let rootfs = Path::new(&b.rootfs);
             let oci_dir = Path::new(&b.oci_dir);
             let image = Image::new(oci_dir)?;
+            let parameters = if let (Some(min), Some(avg), Some(max)) = (b.min, b.avg, b.max) {
+                assert!(
+                    min < avg && avg < max && max - min > avg,
+                    "incorrect fastcdc parameters"
+                );
+                info!("fastcdc params: {min} {avg} {max}");
+                Some([min, avg, max])
+            } else {
+                info!("fastcdc will use default parameters");
+                None
+            };
             match b.base_layer {
                 Some(base_layer) => {
-                    let (desc, image) = add_rootfs_delta(rootfs, image, &base_layer)?;
+                    let (desc, image) =
+                        add_rootfs_delta(rootfs, image, &base_layer, parameters.as_ref())?;
                     image.add_tag(b.tag, desc).map_err(|e| e.into())
                 }
                 None => {
-                    let desc = build_initial_rootfs(rootfs, &image)?;
+                    let desc = build_initial_rootfs(rootfs, &image, parameters.as_ref())?;
                     image.add_tag(b.tag, desc).map_err(|e| e.into())
                 }
             }
