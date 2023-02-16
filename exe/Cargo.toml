@@ -19,6 +19,7 @@ builder = { path = "../builder" }
 oci = { path = "../oci" }
 reader = { path = "../reader" }
 extractor = { path = "../extractor" }
+compression = { path = "../compression" }
 
 [dev-dependencies]
 docker_extract = "*"

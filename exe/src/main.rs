@@ -1,5 +1,6 @@
 use builder::{add_rootfs_delta, build_initial_rootfs};
 use clap::{Args, Parser, Subcommand};
+use compression::Noop;
 use daemonize::Daemonize;
 use env_logger::Env;
 use extractor::extract_rootfs;
@@ -100,11 +101,11 @@ fn main() -> anyhow::Result<()> {
             let image = Image::new(oci_dir)?;
             match b.base_layer {
                 Some(base_layer) => {
-                    let (desc, image) = add_rootfs_delta(rootfs, image, &base_layer)?;
+                    let (desc, image) = add_rootfs_delta::<Noop>(rootfs, image, &base_layer)?;
                     image.add_tag(b.tag, desc).map_err(|e| e.into())
                 }
                 None => {
-                    let desc = build_initial_rootfs(rootfs, &image)?;
+                    let desc = build_initial_rootfs::<Noop>(rootfs, &image)?;
                     image.add_tag(b.tag, desc).map_err(|e| e.into())
                 }
             }

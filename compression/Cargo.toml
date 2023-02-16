@@ -8,6 +8,8 @@ edition = "2018"
 
 [dependencies]
 zstd-seekable = "*"
+zstd = "0.12.3"
 
 [dev-dependencies]
 tempfile = "*"
+anyhow = "*"

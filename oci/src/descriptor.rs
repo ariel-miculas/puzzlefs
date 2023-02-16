@@ -5,6 +5,7 @@ use std::fmt;
 
 extern crate hex;
 
+use hex::FromHexError;
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -48,6 +49,17 @@ impl TryFrom<BlobRef> for Digest {
             BlobRefKind::Other { digest } => Ok(Digest(digest)),
             BlobRefKind::Local => Err(WireFormatError::LocalRefError(Backtrace::capture())),
         }
+    }
+}
+
+impl TryFrom<&str> for Digest {
+    type Error = FromHexError;
+    fn try_from(s: &str) -> std::result::Result<Self, Self::Error> {
+        let digest = hex::decode(s)?;
+        let digest: [u8; SHA256_BLOCK_SIZE] = digest
+            .try_into()
+            .map_err(|_| FromHexError::InvalidStringLength)?;
+        Ok(Digest(digest))
     }
 }
 

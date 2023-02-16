@@ -86,11 +86,12 @@ impl Image {
         buf: R,
     ) -> Result<Descriptor> {
         let tmp = NamedTempFile::new_in(&self.oci_dir)?;
-        let mut compressed = C::compress(tmp.reopen()?);
+        let mut compressed = C::compress(tmp.reopen()?)?;
         let mut hasher = Sha256::new();
 
         let mut t = TeeReader::new(buf, &mut hasher);
         let size = io::copy(&mut t, &mut compressed)?;
+        compressed.end()?;
 
         let digest = hasher.finalize();
         let media_type = C::append_extension(MT::name());
@@ -111,7 +112,7 @@ impl Image {
         digest: &Digest,
     ) -> io::Result<Box<dyn Decompressor>> {
         let f = self.open_raw_blob(digest)?;
-        Ok(C::decompress(f))
+        C::decompress(f)
     }
 
     pub fn open_metadata_blob(&self, digest: &Digest) -> io::Result<MetadataBlob> {
@@ -135,7 +136,7 @@ impl Image {
         buf: &mut [u8],
     ) -> format::Result<usize> {
         let digest = &<Digest>::try_from(chunk)?;
-        let mut blob = self.open_raw_blob(digest)?;
+        let mut blob = self.open_compressed_blob::<compression::Noop>(digest)?;
         blob.seek(io::SeekFrom::Start(chunk.offset + addl_offset))?;
         let n = blob.read(buf)?;
         Ok(n)
@@ -175,6 +176,7 @@ impl Image {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    type DefaultCompression = compression::Noop;
 
     #[test]
     fn test_put_blob_correct_hash() {
@@ -203,7 +205,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let image = Image::new(dir.path()).unwrap();
         let mut desc = image
-            .put_blob::<_, compression::Noop, media_types::Chunk>("meshuggah rocks".as_bytes())
+            .put_blob::<_, DefaultCompression, media_types::Chunk>("meshuggah rocks".as_bytes())
             .unwrap();
         desc.set_name("foo".to_string());
         let mut index = Index::default();
@@ -221,10 +223,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let image = Image::new(dir.path()).unwrap();
         let desc1 = image
-            .put_blob::<_, compression::Noop, media_types::Chunk>("meshuggah rocks".as_bytes())
+            .put_blob::<_, DefaultCompression, media_types::Chunk>("meshuggah rocks".as_bytes())
             .unwrap();
         let desc2 = image
-            .put_blob::<_, compression::Noop, media_types::Chunk>("meshuggah rocks".as_bytes())
+            .put_blob::<_, DefaultCompression, media_types::Chunk>("meshuggah rocks".as_bytes())
             .unwrap();
         assert_eq!(desc1, desc2);
     }
