@@ -136,7 +136,7 @@ impl Image {
         buf: &mut [u8],
     ) -> format::Result<usize> {
         let digest = &<Digest>::try_from(chunk)?;
-        let mut blob = self.open_compressed_blob::<compression::Noop>(digest)?;
+        let mut blob = self.open_compressed_blob::<compression::Zstd>(digest)?;
         blob.seek(io::SeekFrom::Start(chunk.offset + addl_offset))?;
         let n = blob.read(buf)?;
         Ok(n)
@@ -176,7 +176,7 @@ impl Image {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    type DefaultCompression = compression::Noop;
+    type DefaultCompression = compression::Zstd;
 
     #[test]
     fn test_put_blob_correct_hash() {

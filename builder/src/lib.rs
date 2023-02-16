@@ -485,7 +485,7 @@ pub fn add_rootfs_delta<C: Compression>(
 
 // TODO: figure out how to guard this with #[cfg(test)]
 pub fn build_test_fs(path: &Path, image: &Image) -> Result<Descriptor> {
-    build_initial_rootfs::<compression::Noop>(path, image)
+    build_initial_rootfs::<compression::Zstd>(path, image)
 }
 
 #[cfg(test)]
@@ -503,7 +503,7 @@ pub mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    type DefaultCompression = compression::Noop;
+    type DefaultCompression = compression::Zstd;
 
     #[test]
     fn test_fs_generation() {
