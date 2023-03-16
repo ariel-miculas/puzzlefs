@@ -99,7 +99,7 @@ fn process_chunks<C: Compression>(
             digest: desc.digest.underlying(),
         };
 
-        let verity_hash = get_fs_verity_digest(&chunk.data)?;
+        let verity_hash = desc.fs_verity_digest;
         verity_data.insert(desc.digest.underlying(), verity_hash);
 
         while chunk_used < chunk.length as u64 {

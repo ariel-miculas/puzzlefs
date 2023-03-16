@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub use format::Digest;
+pub use format::{Digest, SHA256_BLOCK_SIZE};
 
 const NAME_ANNOTATION: &str = "org.opencontainers.image.ref.name";
 
@@ -11,15 +11,22 @@ pub struct Descriptor {
     pub size: u64,
     pub media_type: String,
     pub annotations: HashMap<String, String>,
+    pub fs_verity_digest: [u8; SHA256_BLOCK_SIZE],
 }
 
 impl Descriptor {
-    pub fn new(digest: [u8; 32], size: u64, media_type: String) -> Descriptor {
+    pub fn new(
+        digest: [u8; 32],
+        size: u64,
+        media_type: String,
+        fs_verity_digest: [u8; SHA256_BLOCK_SIZE],
+    ) -> Descriptor {
         Descriptor {
             digest: Digest::new(&digest),
             size,
             media_type,
             annotations: HashMap::new(),
+            fs_verity_digest,
         }
     }
 

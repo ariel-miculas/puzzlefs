@@ -8,9 +8,9 @@ use std::io;
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
+use fsverity_helpers::get_fs_verity_digest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha2Digest, Sha256};
-use tee::TeeReader;
 use tempfile::NamedTempFile;
 
 use compression::{Compression, Decompressor};
@@ -85,19 +85,27 @@ impl Image {
 
     pub fn put_blob<R: io::Read, C: Compression, MT: media_types::MediaType>(
         &self,
-        buf: R,
+        mut buf: R,
     ) -> Result<Descriptor> {
-        let tmp = NamedTempFile::new_in(&self.oci_dir)?;
+        let mut tmp = NamedTempFile::new_in(&self.oci_dir)?;
         let mut compressed = C::compress(tmp.reopen()?)?;
         let mut hasher = Sha256::new();
 
-        let mut t = TeeReader::new(buf, &mut hasher);
-        let size = io::copy(&mut t, &mut compressed)?;
+        let size = io::copy(&mut buf, &mut compressed)?;
         compressed.end()?;
 
+        let mut compressed_data = Vec::new();
+        tmp.read_to_end(&mut compressed_data)?;
+
+        hasher.update(&compressed_data[..]);
         let digest = hasher.finalize();
         let media_type = C::append_extension(MT::name());
-        let descriptor = Descriptor::new(digest.into(), size, media_type);
+        let descriptor = Descriptor::new(
+            digest.into(),
+            size,
+            media_type,
+            get_fs_verity_digest(&compressed_data[..])?,
+        );
         let path = self.blob_path().join(descriptor.digest.to_string());
 
         // avoid replacing the data blob so we don't drop fsverity data
@@ -109,7 +117,8 @@ impl Image {
             if existing_digest != digest {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,
-                    "blob already exists and it's not content addressable",
+                    format!("blob already exists and it's not content addressable existing digest {}, new digest {}",
+                    hex::encode(existing_digest), hex::encode(digest))
                 )
                 .into());
             }
