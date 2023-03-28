@@ -1,6 +1,7 @@
 extern crate hex;
 
 use fsverity_helpers::check_fs_verity;
+use std::any::Any;
 use std::backtrace::Backtrace;
 use std::convert::TryFrom;
 use std::fs;
@@ -83,13 +84,18 @@ impl Image {
         PathBuf::from("blobs/sha256")
     }
 
-    pub fn put_blob<R: io::Read, C: Compression, MT: media_types::MediaType>(
+    pub fn put_blob<R: io::Read, C: Compression + Any, MT: media_types::MediaType>(
         &self,
         mut buf: R,
     ) -> Result<Descriptor> {
         let mut tmp = NamedTempFile::new_in(&self.oci_dir)?;
         let mut compressed = C::compress(tmp.reopen()?)?;
         let mut hasher = Sha256::new();
+        // generics may not be the best way to implement compression, alternatives:
+        // trait objects, but they add runtime overhead
+        // an enum together with enum_dispatch
+        let compressed_blob =
+            std::any::TypeId::of::<C>() != std::any::TypeId::of::<compression::Noop>();
 
         let size = io::copy(&mut buf, &mut compressed)?;
         compressed.end()?;
@@ -105,6 +111,7 @@ impl Image {
             size,
             media_type,
             get_fs_verity_digest(&compressed_data[..])?,
+            compressed_blob,
         );
         let path = self.blob_path().join(descriptor.digest.to_string());
 
@@ -199,7 +206,11 @@ impl Image {
         } else {
             file_verity = None;
         }
-        let mut blob = self.open_compressed_blob::<compression::Zstd>(digest, file_verity)?;
+        let mut blob = if chunk.compressed {
+            self.open_compressed_blob::<compression::Zstd>(digest, file_verity)?
+        } else {
+            self.open_compressed_blob::<compression::Noop>(digest, file_verity)?
+        };
         blob.seek(io::SeekFrom::Start(chunk.offset + addl_offset))?;
         let n = blob.read(buf)?;
         Ok(n)

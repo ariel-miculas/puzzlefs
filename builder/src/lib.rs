@@ -5,6 +5,7 @@ use fsverity_helpers::{
     FS_VERITY_BLOCK_SIZE_DEFAULT,
 };
 use oci::Digest;
+use std::any::Any;
 use std::backtrace::Backtrace;
 use std::cmp::min;
 use std::collections::{BTreeMap, HashMap};
@@ -74,7 +75,7 @@ struct Other {
     additional: Option<InodeAdditional>,
 }
 
-fn process_chunks<C: Compression>(
+fn process_chunks<C: Compression + Any>(
     oci: &Image,
     mut chunker: StreamCDC,
     files: &mut [File],
@@ -111,6 +112,7 @@ fn process_chunks<C: Compression>(
             let blob = BlobRef {
                 offset: chunk_used,
                 kind: blob_kind,
+                compressed: desc.compressed,
             };
 
             file.as_mut()
@@ -151,7 +153,7 @@ fn inode_encoded_size(num_inodes: usize) -> usize {
     format::cbor_size_of_list_header(num_inodes) + num_inodes * format::INODE_WIRE_SIZE
 }
 
-fn build_delta<C: Compression>(
+fn build_delta<C: Compression + Any>(
     rootfs: &Path,
     oci: &Image,
     mut existing: Option<PuzzleFS>,
@@ -369,6 +371,7 @@ fn build_delta<C: Compression>(
                         Ok(BlobRef {
                             offset: offset as u64,
                             kind: BlobRefKind::Local,
+                            compressed: false,
                         })
                     })
                     .transpose()?;
@@ -400,6 +403,7 @@ fn build_delta<C: Compression>(
                         Ok(BlobRef {
                             offset: offset as u64,
                             kind: BlobRefKind::Local,
+                            compressed: false,
                         })
                     })
                     .transpose()?;
@@ -429,6 +433,7 @@ fn build_delta<C: Compression>(
                         Ok(BlobRef {
                             offset: offset as u64,
                             kind: BlobRefKind::Local,
+                            compressed: false,
                         })
                     })
                     .transpose()?;
@@ -457,7 +462,10 @@ fn build_delta<C: Compression>(
     Ok(desc)
 }
 
-pub fn build_initial_rootfs<C: Compression>(rootfs: &Path, oci: &Image) -> Result<Descriptor> {
+pub fn build_initial_rootfs<C: Compression + Any>(
+    rootfs: &Path,
+    oci: &Image,
+) -> Result<Descriptor> {
     let mut verity_data: VerityData = BTreeMap::new();
     let desc = build_delta::<C>(rootfs, oci, None, &mut verity_data)?;
     let metadatas = [BlobRef {
@@ -465,6 +473,7 @@ pub fn build_initial_rootfs<C: Compression>(rootfs: &Path, oci: &Image) -> Resul
         kind: BlobRefKind::Other {
             digest: desc.digest.underlying(),
         },
+        compressed: false,
     }]
     .to_vec();
 
@@ -482,7 +491,7 @@ pub fn build_initial_rootfs<C: Compression>(rootfs: &Path, oci: &Image) -> Resul
 
 // add_rootfs_delta adds whatever the delta between the current rootfs and the puzzlefs
 // representation from the tag is.
-pub fn add_rootfs_delta<C: Compression>(
+pub fn add_rootfs_delta<C: Compression + Any>(
     rootfs_path: &Path,
     oci: Image,
     tag: &str,
@@ -491,7 +500,6 @@ pub fn add_rootfs_delta<C: Compression>(
     let pfs = PuzzleFS::open(oci, tag, None)?;
     let oci = Arc::clone(&pfs.oci);
     let mut rootfs = oci.open_rootfs_blob::<compression::Noop>(tag, None)?;
-
     if rootfs.manifest_version != PUZZLEFS_IMAGE_MANIFEST_VERSION {
         return Err(WireFormatError::InvalidImageVersion(
             rootfs.manifest_version.to_string(),
@@ -505,6 +513,7 @@ pub fn add_rootfs_delta<C: Compression>(
             digest: desc.digest.underlying(),
         },
         offset: 0,
+        compressed: false,
     };
 
     if !rootfs.metadatas.iter().any(|&x| x == br) {

@@ -12,6 +12,7 @@ pub struct Descriptor {
     pub media_type: String,
     pub annotations: HashMap<String, String>,
     pub fs_verity_digest: [u8; SHA256_BLOCK_SIZE],
+    pub compressed: bool,
 }
 
 impl Descriptor {
@@ -20,6 +21,7 @@ impl Descriptor {
         size: u64,
         media_type: String,
         fs_verity_digest: [u8; SHA256_BLOCK_SIZE],
+        compressed: bool,
     ) -> Descriptor {
         Descriptor {
             digest: Digest::new(&digest),
@@ -27,6 +29,7 @@ impl Descriptor {
             media_type,
             annotations: HashMap::new(),
             fs_verity_digest,
+            compressed,
         }
     }
 
