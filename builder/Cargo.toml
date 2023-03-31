@@ -13,9 +13,10 @@ fsverity_helpers = { path = "../fsverity_helpers" }
 common = { path = "../common" }
 walkdir = "2"
 serde_cbor = "*"
-fastcdc = "3.0.0"
+fastcdc = { git = "https://github.com/ariel-miculas/fastcdc-rs.git", branch="support_parallel_operations" }
 nix = "*"
 hex = "*"
+rayon = "1.7.0"
 
 [dev-dependencies]
 tempfile = "*"

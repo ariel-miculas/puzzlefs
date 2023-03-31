@@ -1,3 +1,4 @@
+#![feature(iterator_try_collect)]
 use common::{AVG_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE};
 use compression::Compression;
 use fsverity_helpers::{
@@ -32,7 +33,7 @@ use nix::errno::Errno;
 use fastcdc::v2020::StreamCDC;
 mod filesystem;
 use filesystem::FilesystemStream;
-
+use std::sync::mpsc::channel;
 const PUZZLEFS_IMAGE_MANIFEST_VERSION: u64 = 1;
 
 fn walker(rootfs: &Path) -> WalkDir {
@@ -75,15 +76,48 @@ struct Other {
     additional: Option<InodeAdditional>,
 }
 
-fn process_chunks<C: for<'a> Compression<'a> + Any>(
+fn write_chunks_to_oci<C: for<'a> Compression<'a> + Any>(
     oci: &Image,
     mut chunker: StreamCDC,
+) -> Result<Vec<Descriptor>> {
+    let mut nr_chunks = 0;
+    let (tx, rx) = channel();
+
+    rayon::scope(|s| {
+        // We cannot use move because it would also move nr_chunks, but we want to mutably borrow it
+        // Transfer ownership of `tx` into a local variable (also named `tx`).
+        // This will force the closure to take ownership of `tx` from the environment
+        let tx = tx;
+        for result in &mut chunker {
+            let chunk = result.unwrap();
+            nr_chunks += 1;
+            let tx = tx.clone();
+            s.spawn(move |_s1| {
+                let desc = oci.put_blob::<C, media_types::Chunk>(&chunk.data);
+                tx.send((nr_chunks, desc))
+                    .expect("channel will be there waiting for the pool");
+            });
+        }
+    });
+
+    // we want the chunks in the same order they were generated, so we can match them with the files
+    let mut sorted_file_chunk_vec = rx.iter().take(nr_chunks).collect::<Vec<_>>();
+    sorted_file_chunk_vec.sort_by(|a, b| a.0.cmp(&b.0));
+    sorted_file_chunk_vec
+        .into_iter()
+        .map(|elem| elem.1)
+        .collect::<Result<Vec<_>>>()
+}
+
+fn process_chunks(
+    chunks: Vec<Descriptor>,
     files: &mut [File],
     verity_data: &mut VerityData,
 ) -> Result<()> {
     let mut file_iter = files.iter_mut();
     let mut file_used = 0;
     let mut file = None;
+
     for f in file_iter.by_ref() {
         if f.md.size() > 0 {
             file = Some(f);
@@ -91,11 +125,10 @@ fn process_chunks<C: for<'a> Compression<'a> + Any>(
         }
     }
 
-    'outer: for result in &mut chunker {
-        let chunk = result.unwrap();
+    let mut chunk_iterator = chunks.iter();
+    'outer: for desc in &mut chunk_iterator {
         let mut chunk_used: u64 = 0;
 
-        let desc = oci.put_blob::<C, media_types::Chunk>(&chunk.data)?;
         let blob_kind = BlobRefKind::Other {
             digest: desc.digest.underlying(),
         };
@@ -103,10 +136,10 @@ fn process_chunks<C: for<'a> Compression<'a> + Any>(
         let verity_hash = desc.fs_verity_digest;
         verity_data.insert(desc.digest.underlying(), verity_hash);
 
-        while chunk_used < chunk.length as u64 {
+        while chunk_used < desc.size {
             let room = min(
                 file.as_ref().unwrap().md.len() - file_used,
-                chunk.length as u64 - chunk_used,
+                desc.size - chunk_used,
             );
 
             let blob = BlobRef {
@@ -144,7 +177,7 @@ fn process_chunks<C: for<'a> Compression<'a> + Any>(
     }
 
     // If there are no files left we also expect there are no chunks left
-    assert!(chunker.next().is_none());
+    assert!(chunk_iterator.next().is_none());
 
     Ok(())
 }
@@ -343,7 +376,9 @@ fn build_delta<C: for<'a> Compression<'a> + Any>(
         AVG_CHUNK_SIZE,
         MAX_CHUNK_SIZE,
     );
-    process_chunks::<C>(oci, fcdc, &mut files, verity_data)?;
+
+    let descriptors = write_chunks_to_oci::<C>(oci, fcdc)?;
+    process_chunks(descriptors, &mut files, verity_data)?;
 
     // total inode serailized size
     let num_inodes = pfs_inodes.len() + dirs.len() + files.len() + others.len();
